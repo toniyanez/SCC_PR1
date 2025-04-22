@@ -1,121 +1,125 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import numpy as np
+import pydeck as pdk
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 
-# -- Data Loading ------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Heineken Digital Twin Streamlit App with Auto-Geocoding & Validation
+# ----------------------------------------------------------------------------
+# This app simulates the impact of trade tariffs and transport costs on Heineken's
+# global margins relative to a user-defined baseline. It automatically fills missing
+# geo-coordinates in nodes.csv and validates edge references.
+# ----------------------------------------------------------------------------
+
+# 1. App Configuration
+st.set_page_config(page_title="Heineken Supply Chain Twin", layout="wide")
+st.title("Heineken Digital Twin: Tariff & Transport Impact Simulator")
+
+# 2. Load Data with Geocoding & Validation
 @st.cache_data
 def load_data():
-    outbound  = pd.read_csv("data/outbound_routes.csv")
-    inbound   = pd.read_csv("data/routes_heineken.csv")
-    breweries = pd.read_csv("data/breweries.csv")
-    return outbound, inbound, breweries
+    nodes = pd.read_csv("data/nodes.csv")  # cols: country, type, lat, lon
+    edges = pd.read_csv("data/edges.csv")  # cols: origin, dest, transport_cost, tariff_rate
 
-# -- Main -------------------------------------------------------------------
-def main():
-    st.set_page_config(layout="wide", page_title="Heineken Global Supply Chain")
-    st.title("🍺 Heineken Global Supply Chain Map")
+    # Geocode missing coordinates
+    geolocator = Nominatim(user_agent="heineken_geocoder")
+    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=2)
+    missing_mask = nodes[['lat', 'lon']].isna().any(axis=1)
+    for idx in nodes[missing_mask].index:
+        country = nodes.at[idx, 'country']
+        loc = geocode(country)
+        if loc:
+            nodes.at[idx, 'lat'] = loc.latitude
+            nodes.at[idx, 'lon'] = loc.longitude
+        else:
+            st.warning(f"Could not geocode country: {country}")
 
-    # Load
-    out_df, in_df, breweries = load_data()
+    # Validate that every edge origin/dest exists in nodes
+    known_countries = set(nodes['country'])
+    bad_origins = set(edges['origin']) - known_countries
+    bad_dests = set(edges['dest']) - known_countries
+    if bad_origins or bad_dests:
+        errs = []
+        if bad_origins:
+            errs.append(f"Unknown origins: {bad_origins}")
+        if bad_dests:
+            errs.append(f"Unknown dests: {bad_dests}")
+        st.error("Edge validation failed: " + "; ".join(errs))
 
-    # Standardize lat/lon column names and drop bad rows
-    for df in (out_df, in_df):
-        df.rename(columns={
-            "origin_latitude":      "olat",
-            "origin_longitude":     "olon",
-            "destination_latitude": "dlat",
-            "destination_longitude":"dlon"
-        }, inplace=True, errors="ignore")
-        df.dropna(subset=["olat","olon","dlat","dlon"], inplace=True)
+    return nodes, edges
 
-    # --- Network Summary Metrics ---------------------------------------------
-    total_breweries = breweries.shape[0]
-    total_suppliers = in_df.drop_duplicates(subset=["olat","olon"]).shape[0]
-    total_routes    = len(in_df) + len(out_df)
-    total_markets   = out_df["destination_market"].nunique()
+nodes, edges = load_data()
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🏭 Breweries",    total_breweries)
-    c2.metric("🔧 Suppliers",    total_suppliers)
-    c3.metric("🚚 Total Routes", total_routes)
-    c4.metric("🌐 Markets",      total_markets)
+# 3. Sidebar Controls
+st.sidebar.header("Simulation Settings")
+baseline = st.sidebar.selectbox(
+    "Select Baseline Scenario", ["Current", "No Tariffs", "Double Tariffs"]
+)
+transport_scale = st.sidebar.slider(
+    "Transport Cost Multiplier", 0.5, 2.0, value=1.0, step=0.1
+)
 
-    st.markdown("---")
+# 4. Compute Relative Margin Impact
+edges_calc = edges.copy()
+# transport cost scaling
+edges_calc["adj_transport_cost"] = edges_calc["transport_cost"] * transport_scale
+# tariff adjustment
+if baseline == "Current":
+    edges_calc["adj_tariff"] = edges_calc["tariff_rate"]
+elif baseline == "No Tariffs":
+    edges_calc["adj_tariff"] = 0
+else:
+    edges_calc["adj_tariff"] = edges_calc["tariff_rate"] * 2
+# compute delta percentage vs. current
+current_cost = edges_calc["transport_cost"] + edges_calc["tariff_rate"]
+edges_calc["cost"] = edges_calc["adj_transport_cost"] + edges_calc["adj_tariff"]
+edges_calc["delta_pct"] = (edges_calc["cost"] - current_cost) / current_cost * 100
 
-    # --- Build the Globe Map -------------------------------------------------
-    fig = go.Figure()
+# 5. Map Visualization
+st.subheader("Global Supply Chain Map")
+# node scatter layer
+node_layer = pdk.Layer(
+    "ScatterplotLayer",
+    data=nodes,
+    get_position='[lon, lat]',
+    get_fill_color="[0, 128, 255]",  # uniform blue for simplicity
+    get_radius=300000,
+    pickable=True,
+)
+# edge arc layer
+# precompute source/target positions using lookup dictionaries
+country_to_coords = {row['country']:(row['lon'], row['lat']) for _, row in nodes.iterrows()}
+edges_calc['source_lon'] = edges_calc['origin'].map(lambda c: country_to_coords.get(c, (None,None))[0])
+edges_calc['source_lat'] = edges_calc['origin'].map(lambda c: country_to_coords.get(c, (None,None))[1])
+edges_calc['target_lon'] = edges_calc['dest'].map(lambda c: country_to_coords.get(c, (None,None))[0])
+edges_calc['target_lat'] = edges_calc['dest'].map(lambda c: country_to_coords.get(c, (None,None))[1])
 
-    # Inbound (Components → Brewery) as dashed orange
-    for _, r in in_df.iterrows():
-        origin = r.get("origin_country", "?")
-        dest   = r.get("destination_brewery", "?")
-        tariff = r.get("tariff_percent", 0)
-        fig.add_trace(go.Scattergeo(
-            lon=[r["olon"], r["dlon"]],
-            lat=[r["olat"], r["dlat"]],
-            mode="lines",
-            line=dict(color="orange", dash="dash", width=2),
-            name=f"{origin} → {dest} ({tariff:.0f}% tariff)",
-            hoverinfo="text",
-            hovertext=f"{origin} → {dest}\nTariff: {tariff:.0f}%"
-        ))
+edge_layer = pdk.Layer(
+    "ArcLayer",
+    data=edges_calc,
+    get_source_position='[source_lon, source_lat]',
+    get_target_position='[target_lon, target_lat]',
+    get_width="np.clip(np.abs(delta_pct)/10, 1, 10)",
+    get_source_color="[255 if delta_pct>0 else 0, 255 if delta_pct<0 else 0, 0]",
+    get_target_color="[255 if delta_pct>0 else 0, 255 if delta_pct<0 else 0, 0]",
+    pickable=True,
+)
 
-    # Outbound (Brewery → Market) as solid green
-    for _, r in out_df.iterrows():
-        origin = r.get("origin_brewery", "?")
-        dest   = r.get("destination_market", "?")
-        tariff = r.get("tariff_percent", 0)
-        fig.add_trace(go.Scattergeo(
-            lon=[r["olon"], r["dlon"]],
-            lat=[r["olat"], r["dlat"]],
-            mode="lines",
-            line=dict(color="green", width=2),
-            name=f"{origin} → {dest} ({tariff:.0f}% tariff)",
-            hoverinfo="text",
-            hovertext=f"{origin} → {dest}\nTariff: {tariff:.0f}%"
-        ))
+view_state = pdk.ViewState(latitude=20, longitude=0, zoom=1)
+deck = pdk.Deck(layers=[node_layer, edge_layer], initial_view_state=view_state)
+st.pydeck_chart(deck)
 
-    # Brewery sites (black squares)
-    fig.add_trace(go.Scattergeo(
-        lon=breweries["longitude"],
-        lat=breweries["latitude"],
-        mode="markers+text",
-        marker=dict(symbol="square", size=8, color="black"),
-        text=breweries["brewery_name"],
-        textposition="top center",
-        name="Brewery"
-    ))
+# 6. Data Table & Metrics
+st.subheader("Edge Cost Impact Details")
+st.dataframe(edges_calc[['origin', 'dest', 'transport_cost', 'tariff_rate', 'cost', 'delta_pct']])
 
-    # Supplier sites (blue diamonds) from inbound origins
-    suppliers = in_df[["olon","olat"]].drop_duplicates()
-    fig.add_trace(go.Scattergeo(
-        lon=suppliers["olon"],
-        lat=suppliers["olat"],
-        mode="markers",
-        marker=dict(symbol="diamond", size=8, color="blue"),
-        name="Supplier"
-    ))
+avg_delta = edges_calc['delta_pct'].mean()
+st.metric(label="Average Cost Change (%)", value=f"{avg_delta:.2f}%")
 
-    # --- Layout --------------------------------------------------------------
-    fig.update_layout(
-        title_text="Heineken Supply Chain: Components → Breweries → Markets",
-        showlegend=True,
-        legend=dict(
-            x=1.02, y=0.5, traceorder="normal",
-            font=dict(size=11),
-            bgcolor="rgba(255,255,255,0.8)"
-        ),
-        geo=dict(
-            projection_type="natural earth",
-            showland=True,
-            landcolor="lightgray",
-            coastlinecolor="gray"
-        ),
-        margin=dict(l=0, r=250, t=50, b=0),
-        height=700
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-if __name__ == "__main__":
-    main()
+# ----------------------------------------------------------------------------
+# To run:
+# pip install streamlit pandas numpy pydeck geopy
+# streamlit run streamlit_app.py
+# ----------------------------------------------------------------------------
