@@ -1,8 +1,0 @@
-product_id,brand,description,packaging_type,volume_ml,alcohol_percent,hs_code
-P_HEINEKEN_330ML,Heineken,Heineken Original Bottle,Glass Bottle,330,5.0,2203.00.00.30
-P_HEINEKEN_500ML,Heineken,Heineken Original Can,Aluminium Can,500,5.0,2203.00.00.60
-P_AMSTEL_500ML,Amstel,Amstel Lager Can,Aluminium Can,500,5.0,2203.00.00.60
-P_TIGER_CAN_33CL,Tiger,Tiger Beer Can,Aluminium Can,330,5.0,2203.00.00.60
-P_DESPERADOS_330ML,Desperados,Tequila-Flavored Beer,Glass Bottle,330,5.9,2203.00.00.30
-P_STRONGBOW_330ML,Strongbow,Apple Cider Bottle,Glass Bottle,330,4.5,2206.00.15.10
-P_MALTINA_330ML,Maltina,Non-Alcoholic Malt Drink,Glass Bottle,330,0.0,2202.99.90.00
