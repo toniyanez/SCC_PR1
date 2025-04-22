@@ -1,86 +1,136 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import json
-from dotenv import load_dotenv
 import os
+from config import DEFAULT_SCENARIO_ID, PRICE_PER_UNIT
 
-load_dotenv()
-
-DEFAULT_SCENARIO = os.getenv("DEFAULT_SCENARIO_ID", "S1")
-PRICE_PER_UNIT = float(os.getenv("DEFAULT_PRICE_PER_UNIT", "1.00"))
-
-
-PRICE_PER_UNIT = 1.00
-from config import DEFAULT_SCENARIO_ID
-scenario_selected = st.selectbox("Select Scenario", list(scenario_names.keys()), index=list(scenario_names).index(DEFAULT_SCENARIO_ID))
-
+# Load data
 @st.cache_data
 def load_data():
     routes = pd.read_csv("data/outbound_routes.csv")
     tariffs = pd.read_csv("data/tariffs_heineken.csv")
     margins = pd.read_csv("data/market_baseline_margins.csv")
+    breweries = pd.read_csv("data/breweries.csv")
+    inbound = pd.read_csv("data/routes_heineken.csv")
+
+    # Filter valid coords
+    routes = routes.dropna(subset=['origin_latitude','origin_longitude','destination_latitude','destination_longitude'])
+    inbound = inbound.dropna(subset=['origin_latitude','origin_longitude','destination_latitude','destination_longitude'])
+
     with open("data/scenarios_heineken.json") as f:
         scenarios = json.load(f)
-    return routes, tariffs, margins, scenarios
+    return routes, tariffs, margins, breweries, inbound, scenarios
+
 
 def apply_scenario(routes, tariffs, scenario):
     def adjust_row(row):
         origin = row['origin_brewery'].split('_')[0]
-        dest = row['destination_market']
-        base_tariff = tariffs.query(
-            f"origin_country == '{origin}' and destination_country == '{dest}' and hs_code == 2203.00.00"
-        )['tariff_percent'].values[0] if not tariffs.empty else 0
-
-        if scenario['sourcing_restrictions'] and origin in scenario['sourcing_restrictions']:
+        dest = row.get('destination_market', row.get('destination_brewery','')).split('_')[0]
+        q = f"origin_country == '{origin}' and destination_country == '{dest}' and hs_code == '2203.00.00'"
+        match = tariffs.query(q)
+        base_tariff = match['tariff_percent'].iat[0] if not match.empty else 0
+        if scenario.get('sourcing_restrictions') and origin in scenario['sourcing_restrictions']:
             row['blocked'] = True
             return row
-        if (scenario['route_origin'] != ["Global"] and origin not in scenario['route_origin']):
-            return row
-        if (scenario['route_destination'] != ["Global"] and dest not in scenario['route_destination']):
-            return row
-
-        row['tariff_percent'] = base_tariff * scenario['tariff_multiplier']
-        row['freight_cost_usd_total'] *= scenario['freight_multiplier']
-        row['lead_time_days'] = scenario['lead_time_delay_days']
+        row['tariff_percent'] = base_tariff * scenario.get('tariff_multiplier',1)
+        row['freight_cost_usd_total'] *= scenario.get('freight_multiplier',1)
+        row['lead_time_days'] = scenario.get('lead_time_delay_days',0)
         return row
+    df = routes.copy()
+    df['blocked'] = False
+    df['lead_time_days'] = 0
+    return df.apply(adjust_row,axis=1)
 
-    routes = routes.copy()
-    routes['blocked'] = False
-    routes['lead_time_days'] = 0
-    routes = routes.apply(adjust_row, axis=1)
-    return routes
 
-def calculate_margins(routes, margins):
-    merged = routes.merge(margins, left_on='destination_market', right_on='country', how='left')
-    merged['total_cost'] = merged['freight_cost_usd_total'] + (merged['tariff_percent'] / 100) * PRICE_PER_UNIT
-    merged['new_margin'] = (PRICE_PER_UNIT - merged['total_cost']) / PRICE_PER_UNIT
-    merged['margin_delta'] = merged['baseline_margin_percent']/100 - merged['new_margin']
-    merged['revenue_loss_usd'] = merged['margin_delta'] * merged['average_volume_units_per_route'] * PRICE_PER_UNIT
-    return merged[['route_id', 'origin_brewery', 'destination_market', 'new_margin', 'margin_delta', 'revenue_loss_usd', 'blocked', 'lead_time_days']]
+def calculate_margins(df, margins):
+    m = df.merge(margins, left_on='destination_market', right_on='country', how='left')
+    m['total_cost'] = m['freight_cost_usd_total'] + (m['tariff_percent']/100)*PRICE_PER_UNIT
+    m['new_margin'] = ((PRICE_PER_UNIT - m['total_cost'])/PRICE_PER_UNIT).clip(-1,1)
+    m['margin_delta'] = (m['baseline_margin_percent']/100 - m['new_margin']).clip(-1,1)
+    m['revenue_loss_usd'] = m['margin_delta'] * m['average_volume_units_per_route'] * PRICE_PER_UNIT
+    return m
+
+
+def show_dashboard(df):
+    st.subheader("📊 KPI Summary")
+    st.metric("Total Revenue Loss", f"${df['revenue_loss_usd'].sum():,.0f}")
+    st.metric("Blocked Routes", int(df['blocked'].sum()))
+    st.metric("Average Margin Drop", f"{df['margin_delta'].mean()*100:.2f}%")
+    st.subheader("📉 Margin Impact by Market")
+    st.bar_chart(df.set_index('destination_market')['margin_delta'])
+
+
+def show_map(breweries, inbound):
+    st.subheader("🌍 Global Supplier & Brewery Locations")
+    fig = go.Figure()
+    # Manufacturer sites
+    fig.add_trace(go.Scattergeo(
+        lon=breweries['longitude'], lat=breweries['latitude'],
+        mode='markers+text', text=breweries['brewery_name'], marker=dict(symbol='circle',size=8,color='green'),
+        textposition='top center', name='Brewery'
+    ))
+    # Supplier origins
+    suppliers = inbound[['origin_latitude','origin_longitude','origin_country']].drop_duplicates()
+    fig.add_trace(go.Scattergeo(
+        lon=suppliers['origin_longitude'], lat=suppliers['origin_latitude'],
+        mode='markers+text', text=suppliers['origin_country'], marker=dict(symbol='diamond',size=8,color='blue'),
+        textposition='bottom center', name='Supplier'
+    ))
+    fig.update_layout(geo=dict(projection_type='natural earth',showland=True,landcolor='lightgray'),height=600,title='Heineken Global Nodes')
+    st.plotly_chart(fig,use_container_width=True)
+
+
+def show_routes_map(outbound, inbound):
+    st.subheader("🚛 Global Route Network Map with Tariffs")
+    fig = go.Figure()
+    # Prepare
+    out = outbound.rename(columns={'origin_latitude':'o_lat','origin_longitude':'o_lon','destination_latitude':'d_lat','destination_longitude':'d_lon'})
+    inb = inbound.rename(columns={'origin_latitude':'o_lat','origin_longitude':'o_lon','destination_latitude':'d_lat','destination_longitude':'d_lon'})
+    # Outbound
+    for _, r in out.iterrows():
+        fig.add_trace(go.Scattergeo(
+            lon=[r['o_lon'],r['d_lon']], lat=[r['o_lat'],r['d_lat']], mode='lines',
+            line=dict(width=1.5,color='green'),opacity=0.7, name='Outbound'
+        ))
+        # tariff label midpoint
+        mid_lon, mid_lat = (r['o_lon']+r['d_lon'])/2,(r['o_lat']+r['d_lat'])/2
+        fig.add_trace(go.Scattergeo(lon=[mid_lon],lat=[mid_lat],mode='text',text=f"{r['tariff_percent']:.1f}%",
+            textfont=dict(color='darkgreen',size=10),showlegend=False))
+    # Inbound
+    for _, r in inb.iterrows():
+        fig.add_trace(go.Scattergeo(
+            lon=[r['o_lon'],r['d_lon']], lat=[r['o_lat'],r['d_lat']], mode='lines',
+            line=dict(width=1,color='blue'),opacity=0.5, name='Inbound'
+        ))
+        mid_lon, mid_lat = (r['o_lon']+r['d_lon'])/2,(r['o_lat']+r['d_lat'])/2
+        fig.add_trace(go.Scattergeo(lon=[mid_lon],lat=[mid_lat],mode='text',text=f"{r['tariff_percent']:.1f}%",
+            textfont=dict(color='darkblue',size=10),showlegend=False))
+    fig.update_layout(title='Supply Chain Routes with Tariff Labels',showlegend=False,
+                      geo=dict(projection_type='natural earth',showland=True,landcolor='lightgray'))
+    st.plotly_chart(fig,use_container_width=True)
+
 
 def main():
-    st.title("Heineken Supply Chain Scenario Simulator")
-    routes, tariffs, margins, scenarios = load_data()
+    st.set_page_config(page_title="Heineken Digital Twin",layout="wide")
+    st.title("🍺 Heineken Digital Supply Chain Twin")
+    routes, tariffs, margins, breweries, inbound, scenarios = load_data()
+    names={s['name']:s for s in scenarios}
+    default=scenarios[0]['name']
+    sel=st.sidebar.selectbox("Select Scenario",list(names.keys()),index=list(names.keys()).index(default))
+    scenario=names[sel]
+    st.sidebar.markdown("---")
+    st.sidebar.json(scenario)
+    adjusted=apply_scenario(routes,tariffs,scenario)
+    results=calculate_margins(adjusted,margins)
+    tab1,tab2,tab3,tab4=st.tabs(["📊 Dashboard","🌍 Map","🚛 Routes","📄 Data"])
+    with tab1: show_dashboard(results)
+    with tab2: show_map(breweries,inbound)
+    with tab3: show_routes_map(adjusted,inbound)
+    with tab4:
+        st.dataframe(results)
+        st.download_button("Download CSV",data=results.to_csv(index=False),file_name="output.csv")
 
-    scenario_names = {s['name']: s for s in scenarios}
-    scenario_selected = st.selectbox("Select Scenario", list(scenario_names.keys()))
-    scenario = scenario_names[scenario_selected]
-
-    st.write("### Scenario Details")
-    st.json(scenario)
-
-    adjusted_routes = apply_scenario(routes, tariffs, scenario)
-    result = calculate_margins(adjusted_routes, margins)
-
-    st.write("### Simulation Results")
-    st.dataframe(result.style.format({
-        'new_margin': '{:.2%}',
-        'margin_delta': '{:.2%}',
-        'revenue_loss_usd': '${:,.0f}'
-    }))
-
-    total_loss = result['revenue_loss_usd'].sum()
-    st.metric("Total Estimated Revenue Loss", f"${total_loss:,.0f}")
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()

@@ -2,3 +2,5 @@ plotly
 matplotlib
 openpyxl
 python-dotenv
+streamlit
+pandas
