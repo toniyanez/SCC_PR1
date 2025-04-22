@@ -1,11 +1,39 @@
 origin,dest,transport_cost,tariff_rate
 Netherlands,France,1.8,0.00
+Netherlands,UK,1.6,0.00
+Netherlands,USA,8.0,0.05
+Netherlands,Nigeria,9.5,0.10
 France,UK,1.2,0.00
-UK,USA,2.5,0.05
+France,USA,7.5,0.05
+France,Germany,0.5,0.00
+France,Spain,0.7,0.00
 France,Vietnam,27.0,0.08
-Vietnam,Nigeria,5.0,0.20
-Mexico,USA,2.2,0.00
+France,India,12.0,0.15
+UK,USA,2.5,0.05
+UK,Australia,15.0,0.00
+UK,Nigeria,7.0,0.05
 USA,Brazil,3.0,0.10
+USA,Mexico,2.2,0.00
+USA,Poland,9.0,0.08
+USA,South Africa,11.0,0.12
+Mexico,USA,2.2,0.00
+Mexico,Brazil,5.5,0.10
+Brazil,South Africa,8.0,0.05
+Brazil,Nigeria,6.2,0.12
 China,Australia,4.5,0.00
+China,Vietnam,1.0,0.05
+China,UK,10.0,0.05
+China,USA,12.0,0.10
+Vietnam,Nigeria,5.0,0.20
+India,UK,9.0,0.12
+India,USA,14.0,0.15
+India,China,2.0,0.05
+Australia,USA,20.0,0.00
+Australia,Brazil,22.0,0.05
 Nigeria,South Africa,6.0,0.00
-…      ,…        ,…       ,…
+Nigeria,UK,7.5,0.10
+South Africa,USA,18.0,0.12
+South Africa,Germany,17.5,0.10
+Ethiopia,UK,8.0,0.08
+Ethiopia,USA,10.0,0.15
+Egypt,USA,16.0,0.10

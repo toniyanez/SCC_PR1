@@ -1,17 +1,17 @@
-country,type,lat,lon
-Netherlands,manufacturer,52.0806,4.2863
-France,manufacturer,46.2276,2.2137
-UK,manufacturer,55.3781,-3.4360
-Spain,manufacturer,40.4637,-3.7492
-Italy,manufacturer,41.8719,12.5674
-Poland,manufacturer,51.9194,19.1451
-Mexico,supplier,23.6345,-102.5528
-USA,supplier,37.0902,-95.7129
-Brazil,supplier,-14.2350,-51.9253
-Vietnam,supplier,14.0583,108.2772
-China,supplier,35.8617,104.1954
-Nigeria,market,9.0820,8.6753
-South Africa,market,-30.5595,22.9375
-Ethiopia,market,9.1450,40.4897
-Egypt,market,26.8206,30.8025
-…     ,…         ,…      ,…
+country,type,lat,lon,capacity,market_size
+Netherlands,manufacturer,52.0806,4.2863,10000000,
+France,manufacturer,46.2276,2.2137,6700000,
+UK,manufacturer,55.3781,-3.4360,,
+Spain,manufacturer,40.4637,-3.7492,,
+Italy,manufacturer,41.8719,12.5674,,
+Poland,manufacturer,51.9194,19.1451,,
+Mexico,supplier,23.6345,-102.5528,,
+USA,supplier,37.0902,-95.7129,,
+Brazil,supplier,-14.2350,-51.9253,,
+Vietnam,supplier,14.0583,108.2772,,
+China,supplier,35.8617,104.1954,,
+Australia,market,-25.2744,133.7751,, 
+Nigeria,market,9.0820,8.6753,,4133
+South Africa,market,-30.5595,22.9375,,4133
+Ethiopia,market,9.1450,40.4897,,4133
+Egypt,market,26.8206,30.8025,,4133
