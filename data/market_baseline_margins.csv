@@ -1,0 +1,11 @@
+country,baseline_margin_percent,average_volume_units_per_route,price_per_unit_usd
+USA,28,100000,1.00
+UK,27,90000,1.00
+Vietnam,25,75000,1.00
+Nigeria,22,120000,1.00
+Ghana,24,85000,1.00
+Mexico,29,110000,1.00
+India,23,95000,1.00
+Germany,30,100000,1.00
+Singapore,26,70000,1.00
+Kenya,20,60000,1.00
